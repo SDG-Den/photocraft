@@ -18,6 +18,7 @@
 //!
 //! Widgets read [`Tokens::get`] instead of hard-coding colours, so every theme applies everywhere.
 
+use craft_ui::theme::palette::Palette;
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, TextStyle, Visuals};
 use photocraft_engine::prefs::UiFontSize;
 use serde::{Deserialize, Serialize};
@@ -764,6 +765,48 @@ impl Tokens {
         }
     }
 
+    /// The tokens of `kind`, with the core chrome roles taken from `palette`. Metrics, fonts and
+    /// the canvas, histogram and document colours stay from the built-in theme.
+    pub fn for_palette(kind: ThemeKind, palette: &Palette) -> Tokens {
+        let built_in = Tokens::for_kind(kind);
+        let background = palette.background();
+        let surface = palette.surface();
+        let raised = palette.surface_alt();
+        let outline = palette.outline();
+        let accent = palette.accent();
+        let on_accent = palette.contrast_text();
+        let text = readable_on(palette.text(), surface, 4.5);
+        let text_dim = readable_on(palette.text_muted(), surface, 3.0);
+        let accent_soft = blend(surface, accent, 0.25);
+        Tokens {
+            chrome: background,
+            dock: blend(background, surface, 0.5),
+            card: surface,
+            card_border: outline,
+            field: raised,
+            field_border: outline,
+            hover: blend(surface, outline, 0.4),
+            pressed: blend(surface, outline, 0.6),
+            text,
+            text_dim,
+            text_faint: blend(text_dim, background, 0.4),
+            icon: blend(text_dim, text, 0.4),
+            accent,
+            accent_soft,
+            accent_border: accent,
+            accent_text: on_accent,
+            separator: outline,
+            shadow: Color32::from_black_alpha(if palette.is_dark() { 150 } else { 50 }),
+            primary_bg: accent,
+            primary_text: on_accent,
+            danger: palette.danger(),
+            warning: palette.warning(),
+            tab_strip: blend(background, surface, 0.4),
+            row_selected: accent_soft,
+            ..built_in
+        }
+    }
+
     /// Tokens for the active theme (stored in egui's context data by [`apply`]).
     pub fn get(ctx: &egui::Context) -> Tokens {
         ctx.data(|d| d.get_temp::<Tokens>(egui::Id::unique("photocraft-theme"))).unwrap_or_else(|| Tokens::for_kind(ThemeKind::Studio))
@@ -842,6 +885,53 @@ impl Tokens {
 
     pub fn dark(&self) -> bool {
         self.kind.is_dark()
+    }
+}
+
+/// `a` toward `b` by `amount` (0 to 1), in gamma space like the rest of the tokens.
+fn blend(a: Color32, b: Color32, amount: f32) -> Color32 {
+    a.lerp_to_gamma(b, amount.clamp(0.0, 1.0))
+}
+
+/// `foreground` moved away from `background` until it reaches `target` WCAG contrast, so a
+/// palette whose text sits too close to its surface still reads.
+fn readable_on(foreground: Color32, background: Color32, target: f32) -> Color32 {
+    let away = if contrast_ratio(background, Color32::WHITE) >= contrast_ratio(background, Color32::BLACK) { Color32::WHITE } else { Color32::BLACK };
+    let mut color = foreground;
+    for _ in 0..20 {
+        if contrast_ratio(color, background) >= target {
+            break;
+        }
+        color = blend(color, away, 0.1);
+    }
+    color
+}
+
+fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+    let (hi, lo) = if relative_luminance(a) > relative_luminance(b) {
+        (relative_luminance(a), relative_luminance(b))
+    } else {
+        (relative_luminance(b), relative_luminance(a))
+    };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+fn relative_luminance(color: Color32) -> f32 {
+    fn linear(channel: u8) -> f32 {
+        let channel = f32::from(channel) / 255.0;
+        if channel <= 0.04045 { channel / 12.92 } else { ((channel + 0.055) / 1.055).powf(2.4) }
+    }
+    0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+}
+
+/// The built-in kind whose dark/light family matches `palette`. A palette decides whether the
+/// app draws dark or light stock visuals and shadows; the saved variant is kept when its family
+/// already matches.
+fn family_kind(kind: ThemeKind, palette: &Palette) -> ThemeKind {
+    match (palette.is_dark(), kind.is_dark()) {
+        (true, false) => ThemeKind::Studio,
+        (false, true) => ThemeKind::StudioLight,
+        _ => kind,
     }
 }
 
@@ -1016,11 +1106,30 @@ pub fn mono(size: f32) -> FontId {
 }
 
 /// Apply a theme to egui's global style and publish its tokens.
+///
+/// The suite palette is discovered here; a palette decides the dark or light family, while the
+/// saved `kind` still supplies the variant. With no palette the built-in theme is unchanged.
 pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
+    #[cfg(not(target_arch = "wasm32"))]
+    let loaded = Palette::load();
+    #[cfg(not(target_arch = "wasm32"))]
+    let palette = loaded.as_ref().map(|loaded| &loaded.palette);
+    #[cfg(target_arch = "wasm32")]
+    let palette: Option<&Palette> = None;
+    apply_with_palette(ctx, kind, palette);
+}
+
+/// Apply a theme to egui's global style and publish its tokens, drawn from `palette` when there
+/// is one and from the built-in theme otherwise.
+pub fn apply_with_palette(ctx: &egui::Context, kind: ThemeKind, palette: Option<&Palette>) {
     // Keep native windows at SystemDefault so macOS continues reporting OS appearance changes,
     // including when an integration or restored egui state pinned its own theme preference.
     ctx.set_theme(egui::ThemePreference::System);
-    let t = Tokens::for_kind(kind);
+    let built_in = palette.map_or(kind, |palette| family_kind(kind, palette));
+    let t = match palette {
+        Some(palette) => Tokens::for_palette(built_in, palette),
+        None => Tokens::for_kind(built_in),
+    };
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique("photocraft-theme"), t));
     let mut v = if t.dark() { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.chrome;

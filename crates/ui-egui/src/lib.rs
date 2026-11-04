@@ -452,6 +452,9 @@ pub struct PhotocraftApp {
     pub(crate) notices_hovered: bool,
     /// Apply theme on first frame.
     styled: bool,
+    /// Watches the shared suite palette file, so a change restyles the running app.
+    #[cfg(not(target_arch = "wasm32"))]
+    palette_watcher: Option<craft_ui::theme::palette::PaletteWatcher>,
     /// Whether the window uses an integrated (transparent) macOS title bar.
     pub integrated_titlebar: bool,
     /// Windows and Linux: the window has no OS decorations and the app's top bar is the title bar

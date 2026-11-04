@@ -88,6 +88,8 @@ impl PhotocraftApp {
             frame: 0,
             notices_hovered: false,
             styled: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            palette_watcher: Some(craft_ui::theme::palette::PaletteWatcher::from_env()),
             integrated_titlebar: false,
             custom_titlebar: false,
             last_window_title: String::new(),

@@ -49,6 +49,13 @@ impl PhotocraftApp {
         if self.live_tokens.poll(ctx, self.ui.theme) {
             self.checker = None;
         }
+        // A palette file changed since the last poll: rebuild tokens and restyle. Polling pauses
+        // while the window is hidden. The web build keeps the built-in theme.
+        #[cfg(not(target_arch = "wasm32"))]
+        if viewport_visible(ctx) && self.palette_watcher.as_mut().and_then(|watcher| watcher.poll(ctx)).is_some() {
+            self.apply_theme(ctx, self.ui.theme);
+            self.checker = None;
+        }
         // Finish or expire outstanding captures first, so a new request admitted in this pass
         // sees their released budget.
         self.drain_captures(ctx);
@@ -360,4 +367,11 @@ impl PhotocraftApp {
         }
         true
     }
+}
+
+/// Whether the host reports the window as visible. A host that says nothing (headless,
+/// `RawInput::default`) counts as visible, as the app's other hidden-window checks do.
+#[cfg(not(target_arch = "wasm32"))]
+fn viewport_visible(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.viewport().visible().unwrap_or(true))
 }
