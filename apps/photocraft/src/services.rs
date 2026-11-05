@@ -341,6 +341,27 @@ pub fn prefs_file() -> Option<PathBuf> {
     config_dir().map(|d| d.join("preferences.json"))
 }
 
+/// The saved preferences text with the declarative `settings.override.json` merged over it.
+///
+/// The overlay is read-only and lives beside `preferences.json`; `craft_settings::overlay`
+/// also honours `CRAFT_SETTINGS_FILE`. Unreadable or invalid preferences fall back to the saved
+/// text, so the session's per-key leniency still applies.
+fn preferences_with_overlay() -> Option<String> {
+    let dir = config_dir()?;
+    let text = std::fs::read_to_string(prefs_file()?).ok()?;
+    let Some(overlay) = craft_settings::overlay::load_overlay(&dir) else {
+        return Some(text);
+    };
+    Some(merge_preferences_json(&text, overlay).unwrap_or(text))
+}
+
+/// Merge an overlay [`serde_json::Value`] into saved preferences text.
+fn merge_preferences_json(text: &str, overlay: serde_json::Value) -> Option<String> {
+    let mut base: serde_json::Value = serde_json::from_str(text).ok()?;
+    craft_settings::overlay::merge(&mut base, overlay);
+    serde_json::to_string(&base).ok()
+}
+
 /// The brush preset store (one file per preset group plus tip bitmaps; see
 /// `photocraft_engine::preset_store`).
 pub fn presets_dir() -> Option<PathBuf> {
@@ -749,7 +770,7 @@ pub fn native(automation: Option<photocraft_automation::AuthorizedWorkspace>) ->
             })
         }),
         clipboard_unreadable: Some(Box::new(move || clip_unreadable.get())),
-        load_prefs: Some(Box::new(|| std::fs::read_to_string(prefs_file()?).ok())),
+        load_prefs: Some(Box::new(preferences_with_overlay)),
         photoshop_shortcuts: Some(Box::new(|| crate::photoshop_settings::live_keyboard_shortcuts(&|k| std::env::var_os(k)))),
         save_prefs: Some(Box::new(|text: &str| write_atomic(&prefs_file().ok_or("no config directory")?, text.as_bytes()))),
         system_theme: crate::appearance::service(),
