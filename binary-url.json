@@ -1,0 +1,8 @@
+{
+  "url": "https://github.com/SDG-Den/photocraft/releases/download/binary-testing/photocraft-0.19.0-linux-x86_64.tar.gz",
+  "hash": "sha256-Ela9RncNMf3VI16s72qnI8ILLorbxeeTQzLr2g21b0E=",
+  "version": "0.19.0",
+  "tag": "binary-testing",
+  "system": "x86_64-linux",
+  "repo": "SDG-Den/photocraft"
+}
