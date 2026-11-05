@@ -362,3 +362,156 @@ fn breeze_themes_parse_and_meet_text_contrast() {
         assert!(contrast(t.caption_close_text, t.caption_close) >= 4.5, "{kind:?}: close button glyph");
     }
 }
+
+/// A canonical dark suite palette: base00 is the window, base01 the panels.
+fn dark_palette() -> Palette {
+    Palette::from_canonical_json(&serde_json::json!({
+        "name": "test-dark",
+        "dark": true,
+        "base00": "#101418",
+        "base01": "#1b2026",
+        "base02": "#262c33",
+        "base03": "#49525c",
+        "base04": "#8b949e",
+        "base05": "#e6edf3",
+        "base08": "#ff6b6b",
+        "base09": "#e3b341",
+        "base0D": "#4c8dff",
+    }))
+    .expect("a canonical palette")
+}
+
+/// A canonical light suite palette.
+fn light_palette() -> Palette {
+    Palette::from_canonical_json(&serde_json::json!({
+        "name": "test-light",
+        "dark": false,
+        "base00": "#fbfbfb",
+        "base01": "#f1f1f1",
+        "base02": "#e4e4e4",
+        "base03": "#b4b4b4",
+        "base04": "#6a6a6a",
+        "base05": "#202020",
+        "base08": "#c83434",
+        "base09": "#b0761a",
+        "base0D": "#0a62d0",
+    }))
+    .expect("a canonical palette")
+}
+
+/// The dark palette overrides the chrome, fields, borders, text, accent, danger and warning; the
+/// canvas and the document-colour tokens stay from the built-in theme.
+#[test]
+fn a_dark_palette_maps_the_chrome_text_and_accent() {
+    let palette = dark_palette();
+    let t = Tokens::for_palette(ThemeKind::Studio, &palette);
+    let built_in = Tokens::for_kind(ThemeKind::Studio);
+    assert_eq!(t.chrome, palette.background(), "chrome is base00");
+    assert_eq!(t.card, palette.surface(), "cards are base01");
+    assert_eq!(t.field, palette.surface_alt(), "fields are base02");
+    assert_eq!(t.card_border, palette.outline(), "borders are base03");
+    assert_eq!(t.field_border, palette.outline(), "field borders are base03");
+    assert_eq!(t.text, palette.text(), "text is base05");
+    assert_eq!(t.text_dim, palette.text_muted(), "muted text is base04");
+    assert_eq!(t.accent, palette.accent(), "accent is base0D");
+    assert_eq!(t.accent_border, palette.accent(), "the accent border follows the accent");
+    assert_eq!(t.primary_bg, palette.accent(), "primary buttons use the accent");
+    assert_eq!(t.primary_text, palette.contrast_text(), "primary labels follow the accent contrast");
+    assert_eq!(t.danger, palette.danger(), "danger is base08");
+    assert_eq!(t.warning, palette.warning(), "warning is base09");
+    assert_eq!(t.row_selected, t.accent_soft, "selected rows use the soft accent");
+    assert_eq!(
+        (t.canvas, t.canvas_dot, t.histogram_bg, t.caption_close),
+        (built_in.canvas, built_in.canvas_dot, built_in.histogram_bg, built_in.caption_close),
+        "canvas and document colours stay built in"
+    );
+    assert_eq!(t.kind, ThemeKind::Studio);
+}
+
+#[test]
+fn a_light_palette_maps_the_chrome_text_and_accent() {
+    let palette = light_palette();
+    for kind in [ThemeKind::StudioLight, ThemeKind::ProLight, ThemeKind::Adwaita] {
+        let t = Tokens::for_palette(kind, &palette);
+        assert_eq!(t.chrome, palette.background(), "{kind:?}");
+        assert_eq!(t.card, palette.surface(), "{kind:?}");
+        assert_eq!(t.field, palette.surface_alt(), "{kind:?}");
+        assert_eq!(t.text, palette.text(), "{kind:?}");
+        assert_eq!(t.accent, palette.accent(), "{kind:?}");
+        assert_eq!(t.primary_bg, palette.accent(), "{kind:?}");
+        assert!(contrast(t.text, t.card) >= 4.5, "{kind:?}: {:.2}:1", contrast(t.text, t.card));
+    }
+}
+
+/// A light palette with a dark saved kind draws light stock visuals, light shadows and the light
+/// family's built-in base; the saved variant still reaches the menu.
+#[test]
+fn a_light_palette_overrides_a_dark_kind_family() {
+    let palette = light_palette();
+    let ctx = egui::Context::default();
+    apply_with_palette(&ctx, ThemeKind::Studio, Some(&palette));
+    let t = Tokens::get(&ctx);
+    assert_eq!(t.kind, ThemeKind::StudioLight, "the light family base is used");
+    assert_eq!(t.chrome, palette.surface(), "the palette still wins the chrome");
+    assert!(!ctx.style_of(egui::Theme::Light).visuals.dark_mode, "light stock visuals");
+    assert!(!ctx.style_of(egui::Theme::Dark).visuals.dark_mode, "both styles are light");
+    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.popup_shadow.color.a(), 50, "light shadows");
+}
+
+/// A dark palette with a light saved kind draws dark stock visuals, dark shadows and the dark
+/// family's built-in base.
+#[test]
+fn a_dark_palette_overrides_a_light_kind_family() {
+    let palette = dark_palette();
+    let ctx = egui::Context::default();
+    apply_with_palette(&ctx, ThemeKind::StudioLight, Some(&palette));
+    let t = Tokens::get(&ctx);
+    assert_eq!(t.kind, ThemeKind::Studio, "the dark family base is used");
+    assert_eq!(t.chrome, palette.surface(), "the palette still wins the chrome");
+    assert!(ctx.style_of(egui::Theme::Dark).visuals.dark_mode, "dark stock visuals");
+    assert!(ctx.style_of(egui::Theme::Light).visuals.dark_mode, "both styles are dark");
+    assert_eq!(ctx.style_of(egui::Theme::Dark).visuals.popup_shadow.color.a(), 150, "dark shadows");
+}
+
+/// When the palette's family already matches, the selected variant's built-in base is kept.
+#[test]
+fn a_palette_keeps_the_selected_variant_when_its_family_matches() {
+    let light = light_palette();
+    for kind in [ThemeKind::StudioLight, ThemeKind::ProLight] {
+        assert_eq!(Tokens::for_palette(kind, &light).kind, kind);
+    }
+    let dark = dark_palette();
+    for kind in [ThemeKind::Studio, ThemeKind::Pro] {
+        assert_eq!(Tokens::for_palette(kind, &dark).kind, kind);
+    }
+}
+
+/// With no palette, the built-in theme is applied unchanged.
+#[test]
+fn without_a_palette_the_built_in_tokens_stay() {
+    for kind in ThemeKind::ALL {
+        let ctx = egui::Context::default();
+        apply_with_palette(&ctx, kind, None);
+        assert_eq!(Tokens::get(&ctx), Tokens::for_kind(kind), "{kind:?}");
+    }
+}
+
+/// Text reaches the app's 4.5:1 target on its panels, and the label drawn on the accent fill
+/// reads, for both palette families.
+#[test]
+fn palette_text_and_accent_labels_read_on_their_surfaces() {
+    for palette in [dark_palette(), light_palette()] {
+        for kind in [ThemeKind::Studio, ThemeKind::StudioLight, ThemeKind::Pro, ThemeKind::ProLight] {
+            let t = Tokens::for_palette(kind, &palette);
+            assert!(contrast(t.text, t.card) >= 4.5, "{kind:?} text on card: {:.2}:1", contrast(t.text, t.card));
+            assert!(contrast(t.text_dim, t.card) >= 3.0, "{kind:?} muted text on card: {:.2}:1", contrast(t.text_dim, t.card));
+            assert!(contrast(t.accent_text, t.accent) >= 4.5, "{kind:?} accent label: {:.2}:1", contrast(t.accent_text, t.accent));
+            assert!(contrast(t.primary_text, t.primary_bg) >= 4.5, "{kind:?} primary label: {:.2}:1", contrast(t.primary_text, t.primary_bg));
+        }
+    }
+
+    let mut washed_out = dark_palette();
+    washed_out.base[5] = washed_out.base[1];
+    let t = Tokens::for_palette(ThemeKind::Studio, &washed_out);
+    assert!(contrast(t.text, t.card) >= 4.5, "lifted text: {:.2}:1", contrast(t.text, t.card));
+}
